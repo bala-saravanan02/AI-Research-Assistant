@@ -1,0 +1,10 @@
+# Caddy obtains and renews the TLS certificate automatically. API_DOMAIN must
+# resolve to this Oracle VM's public IP before the production stack is started.
+{
+    email {$ACME_EMAIL}
+}
+
+{$API_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy frontend-load-balancer:80
+}

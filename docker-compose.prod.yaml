@@ -1,0 +1,86 @@
+# Production overlay. Run alongside docker-compose.yaml on the Oracle VM:
+# docker compose -f docker-compose.yaml -f docker-compose.prod.yaml up -d --build
+#
+# Required .env values: API_DOMAIN, ACME_EMAIL, POSTGRES_PASSWORD and the
+# application secrets documented in .env.example.
+services:
+  frontend-load-balancer:
+    # Caddy is the only public entry point in production.
+    ports: !reset []
+    expose:
+      - "80"
+    restart: unless-stopped
+    depends_on:
+      api-instance-alpha:
+        condition: service_healthy
+      api-instance-beta:
+        condition: service_healthy
+
+  api-instance-alpha:
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  api-instance-beta:
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  worker-pool-instance-1:
+    restart: unless-stopped
+
+  worker-pool-instance-2:
+    restart: unless-stopped
+
+  mcp-server-service:
+    restart: unless-stopped
+
+  job-queue-cache:
+    # Redis is reachable only by services on the Docker network.
+    ports: !reset []
+    restart: unless-stopped
+
+  research-vector-db:
+    # Postgres is reachable only by services on the Docker network.
+    ports: !reset []
+    environment:
+      POSTGRES_USER: research_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: research_assistant_db
+    restart: unless-stopped
+
+  streamlit-ui:
+    # The UI is hosted by Streamlit Community Cloud in production.
+    profiles: ["local"]
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: system-design-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    volumes:
+      - ./config/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      frontend-load-balancer:
+        condition: service_started
+    networks:
+      - system-design-mesh
+
+volumes:
+  caddy-data:
+  caddy-config:

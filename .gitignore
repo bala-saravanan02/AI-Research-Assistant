@@ -14,3 +14,7 @@ wheels/
 .env.*
 !.env.example
 .streamlit/secrets.toml
+
+# Caddy's production TLS certificates and state
+caddy_data/
+caddy_config/
