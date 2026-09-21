@@ -1,0 +1,157 @@
+services:
+  # 1. THE TRAFFIC COP (Nginx Load Balancer)
+  frontend-load-balancer:
+    image: nginx:latest
+    container_name: system-design-frontend-load-balancer-1
+    ports:
+      - "80:80"  # Opens port 80 on your host machine
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /dev/null:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api-instance-alpha
+      - api-instance-beta
+    networks:
+      - system-design-mesh
+
+  # 2. APPLICATION INSTANCE 1
+  api-instance-alpha:
+    build: .
+    container_name: system-design-api-instance-alpha-1 
+    command: uv run uvicorn src.system_design.app:app --host 0.0.0.0 --port 8000
+    expose:
+      - "8000"
+    environment:
+      - INSTANCE_NAME=API_SERVER_ALPHA
+      - REDIS_URL=redis://job-queue-cache:6379/0
+    env_file:
+      - .env
+    depends_on:
+      job-queue-cache:
+        condition: service_started
+      research-vector-db:
+        condition: service_healthy
+    networks:
+      system-design-mesh:
+        aliases:
+          - api-instance-alpha
+
+  # 3. APPLICATION INSTANCE 2
+  api-instance-beta:
+    build: .
+    command: uv run uvicorn src.system_design.app:app --host 0.0.0.0 --port 8000
+    container_name: system-design-api-instance-beta-1 
+    expose:
+      - "8000"
+    environment:
+      - INSTANCE_NAME=API_SERVER_BETA
+      - REDIS_URL=redis://job-queue-cache:6379/0
+    env_file:
+      - .env
+    depends_on:
+      job-queue-cache:
+        condition: service_started
+      research-vector-db:
+        condition: service_healthy
+    networks:
+      system-design-mesh:
+        aliases:
+          - api-instance-beta
+
+  # 4. CELERY WORKER 1
+  worker-pool-instance-1:
+    build: .
+    container_name: system-design-worker-pool-instance-1-1
+    command: uv run celery -A src.system_design.setup.celery_app.celery_instance worker --loglevel=info
+    environment:
+      - REDIS_URL=redis://job-queue-cache:6379/0
+    env_file:
+      - .env
+    depends_on:
+      - job-queue-cache
+      - research-vector-db
+      - mcp-server-service
+    networks:
+      - system-design-mesh
+
+  # 5. CELERY WORKER 2
+  worker-pool-instance-2:
+    build: .
+    container_name: system-design-worker-pool-instance-2-1
+    command: uv run celery -A src.system_design.setup.celery_app.celery_instance worker --loglevel=info
+    environment:
+      - REDIS_URL=redis://job-queue-cache:6379/0
+    env_file:
+      - .env
+    depends_on:
+      - job-queue-cache
+      - research-vector-db
+      - mcp-server-service
+    networks:
+      - system-design-mesh
+
+  # 6. CACHE & QUEUE ENGINE
+  job-queue-cache:
+    image: redis:7-alpine
+    container_name: system-design-job-queue-cache-1
+    ports:
+      - "6380:6379"  
+    networks:
+      - system-design-mesh
+  
+  # 7. VECTOR STORAGE MESH
+  research-vector-db:
+    image: pgvector/pgvector:pg16   
+    container_name: system-design-research-vector-db-1
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=research_admin
+      - POSTGRES_PASSWORD=secure_pass_123
+      - POSTGRES_DB=research_assistant_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U research_admin -d research_assistant_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - pgdata-storage-mesh:/var/lib/postgresql/data
+    networks:
+      - system-design-mesh
+      
+  # 8. STREAMLIT UI
+  streamlit-ui:
+    build: .
+    container_name: system-design-streamlit-ui-1
+    command: uv run streamlit run src/system_design/streamlit_app.py --server.port 8501 --server.address 0.0.0.0
+    ports:
+      - "8501:8501"
+    environment:
+      - API_BASE_URL=http://frontend-load-balancer:80
+      - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false  # 👈 Permanently blocks Fivetran Webhook telemetry noise
+    depends_on:
+      - frontend-load-balancer
+    networks:
+      - system-design-mesh
+
+  # 9. THE CENTRALIZED MCP SERVER
+  mcp-server-service:
+    build: .
+    container_name: system-design-mcp-server-service-1
+    command: uv run uvicorn src.system_design.mcp_app:app --host 0.0.0.0 --port 8080
+    expose:
+      - "8080"  # 👈 Fixed port match to listen accurately to uvicorn target interface
+    env_file:
+      - .env
+    environment:
+      - INSTANCE_NAME=MCP_SERVER_CENTRAL
+    networks:
+      - system-design-mesh
+
+# Persistent infrastructure allocations
+volumes:
+  pgdata-storage-mesh:
+
+networks:
+  system-design-mesh:
+    driver: bridge
