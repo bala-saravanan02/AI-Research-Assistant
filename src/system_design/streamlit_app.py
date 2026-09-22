@@ -20,7 +20,14 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-API_BASE = os.getenv("API_BASE_URL") or ""
+# Streamlit Community Cloud exposes root-level secrets as `st.secrets`; local
+# Docker development continues to use API_BASE_URL from the environment. Do not
+# default to a provider homepage because it is not an API endpoint.
+try:
+    API_BASE = str(st.secrets.get("API_BASE_URL") or os.getenv("API_BASE_URL") or "")
+except FileNotFoundError:
+    API_BASE = os.getenv("API_BASE_URL") or ""
+API_BASE = API_BASE.rstrip("/")
 
 SUGGESTIONS = [
     ("travel_explore", "Summarize the current state of retrieval-augmented generation"),
