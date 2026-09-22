@@ -18,3 +18,9 @@ RUN uv pip install --system --no-cache-dir .
 
 #Expose this port so that the application receices the network requests
 EXPOSE 8000
+
+# Render worker entrypoint: starts Celery and a minimal listener required by
+# Render's Web Service port check. Compose service commands override this CMD.
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+CMD ["/app/start.sh"]
